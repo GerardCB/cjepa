@@ -19,7 +19,7 @@ Evaluated on **CLEVRER VQA** using the ALOE framework. Both models trained for 3
 
 ### ALOE VQA Accuracy (Epoch 79)
 
-| Metric | Baseline | CTT-JEPA | Δ | Paper (|M|=2) |
+| Metric | Baseline | CTT-JEPA | Δ | Paper (M=2) |
 |---|---|---|---|---|
 | **Descriptive** | **91.4%** | 89.8% | −1.6% | 91.0% |
 | **Counterfactual** | **57.5%** | 49.4% | −8.1% | 50.3% |
