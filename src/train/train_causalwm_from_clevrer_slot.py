@@ -17,6 +17,7 @@ from torch.nn import functional as F
 from tqdm import tqdm
 import wandb
 from src.cjepa_predictor import MaskedSlotPredictor
+from src.ctt_losses import ctt_invariance_loss, ctt_sufficiency_loss
 
 import pickle as pkl
 import numpy as np
@@ -199,8 +200,19 @@ def setup_wandb(cfg, rank):
     return wandb
 
 
-def compute_loss(predictor, batch, cfg, device, inference=False):
-    """Compute loss for a batch."""
+def compute_loss(predictor, batch, cfg, device, inference=False, epoch=0):
+    """Compute loss for a batch.
+    
+    C-JEPA losses (original):
+        - loss_masked_history: MSE on masked slot predictions in history
+        - loss_future: MSE on future frame predictions
+    
+    CTT losses (our contribution, controlled via config):
+        - loss_inv: invariance loss (Axiom 6) — masking non-interacting slots
+                    should not affect predictions
+        - loss_suf: sufficiency loss (Axiom 4) — neighborhood alone should
+                    suffice for prediction
+    """
     embed = batch["embed"].to(device)  # (B, T, S, D)
 
     # Split into history and target
@@ -248,8 +260,29 @@ def compute_loss(predictor, batch, cfg, device, inference=False):
         loss_future = F.mse_loss(pred_future, target.detach())
         losses["loss_future"] = loss_future
 
-        # Total loss
+        # Total loss (C-JEPA baseline)
         total_loss = loss_masked_history + loss_future
+
+        # ── CTT losses (our contribution) ──
+        ctt_inv_weight = cfg.get("ctt_inv_weight", 0.0)
+        ctt_suf_weight = cfg.get("ctt_suf_weight", 0.0)
+        ctt_start_epoch = cfg.get("ctt_start_epoch", 0)
+        ctt_active = epoch >= ctt_start_epoch
+
+        if ctt_active and ctt_inv_weight > 0:
+            loss_inv = ctt_invariance_loss(predictor, history, target, mask_indices, cfg)
+            total_loss = total_loss + ctt_inv_weight * loss_inv
+            losses["loss_inv"] = loss_inv
+        else:
+            losses["loss_inv"] = torch.tensor(0.0, device=device)
+
+        if ctt_active and ctt_suf_weight > 0:
+            loss_suf = ctt_sufficiency_loss(predictor, history, target, cfg)
+            total_loss = total_loss + ctt_suf_weight * loss_suf
+            losses["loss_suf"] = loss_suf
+        else:
+            losses["loss_suf"] = torch.tensor(0.0, device=device)
+
         losses["loss"] = total_loss
 
     return losses
@@ -509,7 +542,7 @@ def run(cfg):
             # Compute loss
             losses = compute_loss(
                 predictor.module if is_ddp else predictor,
-                batch, cfg, device
+                batch, cfg, device, epoch=epoch
             )
 
             # Backward pass
@@ -531,13 +564,19 @@ def run(cfg):
 
             # Log to wandb (every N steps)
             if wandb_logger is not None and global_step % cfg.get("log_every_n_steps", 10) == 0:
-                wandb_logger.log({
+                log_dict = {
                     "train/loss": losses["loss"].item(),
                     "train/loss_future": losses["loss_future"].item(),
                     "train/loss_masked_history": losses["loss_masked_history"].item(),
                     "train/step": global_step,
                     "train/epoch": epoch,
-                })
+                }
+                # CTT loss logging
+                if "loss_inv" in losses:
+                    log_dict["train/loss_inv"] = losses["loss_inv"].item()
+                if "loss_suf" in losses:
+                    log_dict["train/loss_suf"] = losses["loss_suf"].item()
+                wandb_logger.log(log_dict)
 
         # Epoch-level metrics
         avg_train_loss = epoch_loss / max(num_batches, 1)

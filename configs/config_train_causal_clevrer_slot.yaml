@@ -75,6 +75,14 @@ action_encoder_lr: 5e-4
 
 dump_object: true
 
+# ── CTT Losses (our contribution) ──
+# Set weights > 0 to enable. Use 0.0 to exactly reproduce C-JEPA baseline.
+# Example: ctt_inv_weight=0.2 ctt_suf_weight=0.1 ctt_start_epoch=10
+ctt_inv_weight: 0.0        # invariance loss weight (Axiom 6)
+ctt_suf_weight: 0.0        # sufficiency loss weight (Axiom 4)
+ctt_adj_threshold: 0.15    # attention threshold for neighbor detection
+ctt_start_epoch: 10        # epoch to start CTT losses (phased training)
+
 
 
 
