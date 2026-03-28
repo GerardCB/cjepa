@@ -4,7 +4,7 @@
 
 ## Key Idea
 
-C-JEPA learns a causal world model through **masked slot prediction** — masking object slots and predicting them from context. We add two loss terms derived from [Causal Transformation Theory](https://arxiv.org/abs/2501.XXXXX) that enforce the attention-based causal graph to satisfy fundamental causal axioms:
+C-JEPA learns a causal world model through **masked slot prediction** — masking object slots and predicting them from context. We add two loss terms derived from [Causal Transformation Theory](../ctt-builders-guide.md) that enforce the attention-based causal graph to satisfy fundamental causal axioms:
 
 | Loss | CTT Axiom | What it enforces |
 |---|---|---|
