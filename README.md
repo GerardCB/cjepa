@@ -150,16 +150,6 @@ cjepa/
 └── data/                                ← Slot embeddings (downloaded)
 ```
 
-## Citation
-
-```bibtex
-@article{ctt-jepa2026,
-    title={CTT-JEPA: Enforcing Causal Axioms in Joint Embedding Predictive Architectures},
-    author={Gerard Calvo Bartra},
-    year={2026}
-}
-```
-
 ## Acknowledgments
 
 Built on top of [C-JEPA](https://github.com/galilai-group/cjepa) by the Galilai Group. CTT axioms adapted from Causal Transformation Theory.
