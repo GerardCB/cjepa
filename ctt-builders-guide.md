@@ -14,6 +14,8 @@ Current AI doesn't do this. A large language model or a standard video predictio
 
 The fundamental problem: **correlation is fragile, causation transfers.** If you learn *that* A predicts B, your knowledge breaks when the context changes. If you learn *how* A produces B (the mechanism), you can adapt — modify the mechanism, reason about what happens if A is different, transfer the mechanism to new settings.
 
+In this document, we aim to formally define causality and explain how to train AI models to learn it. We name this "Causal Transformation Theory" (CTT).
+
 ### What "Learning Causality" Means Concretely
 
 When we say we want an AI system to "learn causality from data," we mean four specific capabilities:
@@ -414,5 +416,3 @@ Putting it all together, a CTT-informed causal world model is:
 **A counterfactual inference procedure** that, given a factual trajectory and a hypothetical intervention, produces the counterfactual trajectory by: (1) running the model up to the intervention time with shared dynamics, (2) applying the intervention (replace a mechanism), (3) rolling forward with the modified dynamics. The counterfactual coherence axiom guarantees this procedure is well-defined.
 
 The entire system learns from unlabeled video or sensor data. No causal graph annotations. No human-specified mechanisms. The causal structure *emerges* from the combination of predictive training (Axiom 5), masking interventions (Axioms 4 and 6), and multi-step consistency (Axiom 2).
-
-This is the mathematical structure that makes it work.
