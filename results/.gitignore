@@ -1,0 +1,3 @@
+# Keep logs, ignore large model checkpoints (use HuggingFace or GDrive for those)
+*.ckpt
+*.pth

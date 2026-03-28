@@ -12,9 +12,9 @@ from omegaconf import OmegaConf
 import torch
 import hydra
 from torch.utils.data import DataLoader
-from src.world_models.dinowm_causal import CausalWM
-from src.cjepa_predictor import MaskedSlotPredictor
-from src.third_party.videosaur.videosaur import  models
+# NOTE: videosaur, CausalWM, MaskedSlotPredictor imports removed —
+# they are not needed for ALOE VQA and pull in torchcodec which
+# crashes on many GPU instances due to CUDA version mismatches.
 import stable_pretraining as spt
 import stable_worldmodel as swm
 from nerv.utils import mkdir_or_exist

@@ -1,172 +1,165 @@
-# C-JEPA
-## Causal-JEPA: Learning World Models through Object-Level Latent Interventions
-by [Heejeong Nam](https://hazel-heejeong-nam.github.io/), [Quentin Le Lidec\*](https://quentinll.github.io/),[Lucas Maes\*](https://lucasmaes.bearblog.dev/), [Yann LeCun](http://yann.lecun.com/), [Randall Balestriero](https://randallbalestriero.github.io/).
+# CTT-JEPA: Causal Transformation Theory for Joint Embedding Predictive Architectures
 
-* Paper: [https://arxiv.org/abs/2602.11389](https://arxiv.org/abs/2602.11389)
-* Project Page: [https://hazel-heejeong-nam.github.io/cjepa/](https://hazel-heejeong-nam.github.io/cjepa/)
+> **Extending [C-JEPA](https://github.com/galilai-group/cjepa) with causal inductive biases from Causal Transformation Theory (CTT)**
 
-![architecture](static/architecture.png)
+## Key Idea
 
-## Summary
-World models require robust relational understanding to support prediction, reasoning, and control. While object-centric representations provide a useful abstraction, they are not sufficient to capture interaction-dependent dynamics. We therefore propose C-JEPA, a simple and flexible object-centric world model that extends masked joint embedding prediction from image patches to object-centric representations. 
-By applying object-level masking that requires an object's state to be inferred from other objects, C-JEPA induces latent interventions with counterfactual-like effects and prevents shortcut solutions, making interaction reasoning essential.
-Empirically, C-JEPA leads to consistent gains in visual question answering, with **an absolute improvement of about 20\% in counterfactual reasoning** compared to the same architecture without object-level masking. On agent control tasks, C-JEPA enables substantially more efficient planning by **using only 1\% of the total latent input features required by patch-based world models**, while achieving comparable performance. Finally, we provide a formal analysis demonstrating that object-level masking induces a causal inductive bias via latent interventions.
+C-JEPA learns a causal world model through **masked slot prediction** — masking object slots and predicting them from context. We add two loss terms derived from [Causal Transformation Theory](ctt-builders-guide.md) that enforce the attention-based causal graph to satisfy fundamental causal axioms:
 
+| Loss | CTT Axiom | What it enforces |
+|---|---|---|
+| **Invariance** | Axiom 6 | Masking a non-interacting slot should *not* degrade predictions for unrelated slots |
+| **Sufficiency** | Axiom 4 | A slot's causal neighborhood alone should *suffice* to predict it |
 
-## Setup
-* Please refer to [ENV.md](docs/ENV.md) for environment setup.
-* C-JEPA is mainly built on top of [Stable-WorldModel](https://galilai-group.github.io/stable-worldmodel/) and [Stable-Pretraining](https://galilai-group.github.io/stable-pretraining/).
-* We adopt [original repo here](https://github.com/martius-lab/videosaur) for training VideoSAUR.
-* We adopt [original repo here](https://github.com/pairlab/SlotFormer) for SAVi and VQA model for CLEVRER (a.k.a. ALOE).
+These losses use the transformer's own attention weights as the causal adjacency graph — **no architecture changes** are required. The only modification is two additive loss terms controlled via config flags.
 
-## Dataset Preparation
-Please refer to [DATASET.md](docs/DATASET.md) for dataset preparation.
+## Results
 
-## Object-Centric Model / Representations for C-JEPA
-C-JEPA relies on object-centric encoders to extract object-centric representations. You can train the encoder by yourself, or download the model checkpoints from HuggingFace, or download the pre-extracted slot representations.
+Evaluated on **CLEVRER VQA** using the ALOE framework. Both models trained for 30 epochs (world model) + 100 epochs (ALOE VQA) on 1× H100 with `|M|=2` masked slots and `batch_size=2048`.
 
-![visualization](static/encoder_vis.png)
+### ALOE VQA Accuracy (Epoch 79)
 
-### 1. Train Object-Centric Encoder
-* Train VideoSAUR on CLEVRER
-  ```
-  PYTHONPATH=. python src/third_party/videosaur/videosaur/train.py \
-      src/third_party/videosaur/configs/videosaur/clevrer_dinov2_hf.yml \
-      dataset.train_shards="/to/data/path/clevrer-train-{000000..0000XX}.tar" \
-      dataset.val_shards="/to/data/path/clevrer-val-{000000..0000XX}.tar" \
-      globals.BATCH_SIZE_PER_GPU=32 \
-  ```
+| Metric | Baseline | CTT-JEPA | Δ | Paper (\|M\|=2) |
+|---|---|---|---|---|
+| **Descriptive** | **91.4%** | 89.8% | −1.6% | 91.0% |
+| **Counterfactual** | **57.5%** | 49.4% | −8.1% | 50.3% |
+| **Explanatory** | **84.9%** | 81.0% | −3.9% | 82.5% |
+| **Predictive** | **80.1%** | 77.9% | −2.2% | 79.6% |
+| **Multiple-choice** | **72.1%** | 66.7% | −5.4% | — |
 
-* Train SAVi on CLEVRER
+> ✅ Our baseline matches or exceeds the paper's C-JEPA (V) results at |M|=2, validating the pipeline.
+>
+> ❌ CTT losses (invariance + sufficiency) via attention-based causal graphs **degrade** VQA by 2–8%.
 
-  * Refer to slotformer repo to setup data for train savi. Then you have to modify `data_root` and `gpus` in `src/third_party/slotformer/base_slots/configs/stosavi_clevrer_params.py` to point to the data directory. After that, you can run the code below to train SAVi on CLEVRER.
+### Analysis
 
-  * Before running the code, replace whole `src/third_party/nerv/nerv/utils/misc.py` with `src/custom_codes/misc.py`. This is because the original code is based on `pytorch-lightning==0.8.*` while we are using `pytorch-lightning==2.6.*`.
+The attention weights used as the causal adjacency matrix capture **statistical correlations, not causal structure**. This causes the invariance and sufficiency losses to enforce the wrong constraints — particularly harming counterfactual reasoning (−8.1%). Key takeaways:
 
-  ```
-  PYTHONPATH=. torchrun --nproc_per_node=3 src/aloe_train.py \
-    --task base_slots \
-    --params src/third_party/slotformer/base_slots/configs/stosavi_clevrer_params.py \
-    --exp_name clevrer_savi_reproduce \
-    --out_dir $OUTDIR \
-    --fp16 --ddp --cudnn
-  ```
+- **Naive CTT integration is insufficient** — a proper causal discovery mechanism is needed
+- **A learned causal graph** (e.g., DAG-GNN, NOTEARS) would likely improve results
+- **Loss weights** (`inv=0.2, suf=0.1`) may need to be much smaller as soft regularizers
 
-* Train VideoSAUR on PushT
-  ```
-  PYTHONPATH=. python src/third_party/videosaur/videosaur/train.py \
-      src/third_party/videosaur/configs/videosaur/pusht_dinov2_hf.yml \
-      dataset.train_shards="pusht_mixed/train/pusht-train-{000000..0000xx}.tar" \
-      dataset.val_shards="pusht_mixed/validation/pusht-val-{000000..00000x}.tar"
-  ```
+For full analysis, see [RESULTS.md](RESULTS.md).
 
-### 2. Model Checkpoints
-| Dataset      | Encoder    |  Hyperparams                      | Checkpoint Link                                                                                             |
-|--------------|------------------|---------------------------|------------------------------------------------------------------------------------------------------------|
-| CLEVRER       | VideoSAUR   | clevrer_dinov2_hf.yml        | [Checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/clevrer_videosaur_model.ckpt) |
-| CLEVRER       | SAVi   | stosavi_clevrer_params.py        | [Checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/clevrer_savi_model.pth) |
-| Push-T       | VideoSAUR   | pusht_dinov2_hf.yml        | [Checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/pusht_videosaur_model.ckpt) |
+## What Changed from C-JEPA
 
-### 3. Pre-extracted Slot Representations
-| Dataset      | Encoder    |  Config                      | Checkpoint Link                                                                                             |
-|--------------|------------------|---------------------------|------------------------------------------------------------------------------------------------------------|
-| CLEVRER       | VideoSAUR   | clevrer_dinov2_hf.yml        | [Checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/clevrer_videosaur_slots.pkl) |
-| CLEVRER       | SAVi   | stosavi_clevrer_params.py       | [Checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/clevrer_savi_slots.pkl) |
-| PUSHT       | VideoSAUR   | pusht_dinov2_hf.yml        | [Checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/pusht_videosaur_slots.pkl) |
+Only **3 files** were modified/added:
 
-
-## Train / Download C-JEPA
-
-### Extract slot representations with the checkpoints
-
-Use this only if you want to extract slots by yourself. If you are using pre-extracted slots, you can skip this step and directly download the pre-extracted slots from HuggingFace.
-
-* CLEVRER SAVi slots 
-  *  Refer to slotformer repo to setup data for train savi. Then you have to modify `data_root` in `src/third_party/slotformer/base_slots/configs/stosavi_clevrer_params.py` to point to the data directory. After that, you can run the code below to train SAVi on CLEVRER.
-  ```
-  PYTHONPATH=. python src/third_party/slotformer/base_slots/extract_slots.py --params src/third_party/slotformer/base_slots/configs/stosavi_clevrer_params.py  --weight $WEIGHT  --save_path clevrer_savi_slots.pkl
-  ```
-* CLEVRER VideoSAUR 
-  ```
-  PYTHONPATH=. python src/third_party/slotformer/base_slots/extract_videosaur.py --weight $WEIGHT --data_root="~/.stable_worldmodel"   --save_path=$SAVE_DIR --dataset="clevrer"  --videosaur_config="src/third_party/videosaur/configs/videosaur/clevrer_dinov2_hf.yml" 
-  ```
-* PushT VideoSAUR Slots
-  ```
-  PYTHONPATH=. python src/third_party/slotformer/base_slots/extract_videosaur.py --weight $WEIGHT --data_root="~/.stable_worldmodel"   --save_path=$SAVE_DIR  --dataset="pusht_expert"  --videosaur_config="src/third_party/videosaur/configs/videosaur/pusht_dinov2_hf.yml"   --params="src/third_party/slotformer/aloe_pusht_params.py"
-  ```
-
-* Extracted pkl will look like:
-
-  ```
-  {
-      'train': {'0_pixels.mp4': slots, '1_pixels.mp4': slots, ...},  # slots: [T, N, 128] each
-      'val': {...},
-      'test': {...}
-  }
-  ```
-
-### 2. Run C-JEPA with pre-extracted slot representations
-
-Use scripts below. You can change the config file and the checkpoint path to run with different settings. For example, you can change `num_masked_slots` to control how many slots are masked.
-
-```sh
-sh script/clevrer/train_cjepa_from_slot.sh
-sh script/pusht/train_cjepa_from_slot.sh 
+```
+src/ctt_losses.py                              [NEW]  — CTT loss functions
+src/train/train_causalwm_from_clevrer_slot.py  [MOD]  — Integrated CTT into compute_loss()
+configs/config_train_causal_clevrer_slot.yaml   [MOD]  — Added CTT config flags
 ```
 
-### 3. Download C-JEPA checkpoints
-* We release checkpoints for C-JEPA trained with different object-centric backbones and different number of masked slots. 
-* (*) means it performs best. (See the paper for details.)
+<details>
+<summary><strong>Detailed changes</strong></summary>
 
-| Dataset      |   OC-Backbone    |    Masked Slots / Total Slots    | Checkpoint Link                                                 |
-|--------------|------------------|---------------------------|------------------------------------------------------------------|
-| CLEVRER       | VideoSAUR   | 0/7       | [checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/cjepa-ckpts/clevrer_videosaur_0_epoch_30_object.ckpt)                             |
-| CLEVRER       | VideoSAUR   | 1/7       | [checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/cjepa-ckpts/clevrer_videosaur_1_epoch_30_object.ckpt)                             |
-| CLEVRER       | VideoSAUR   | 2/7      | [checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/cjepa-ckpts/clevrer_videosaur_2_epoch_30_object.ckpt)                             |
-| CLEVRER       | VideoSAUR   | 3/7      | [checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/cjepa-ckpts/clevrer_videosaur_3_epoch_30_object.ckpt)                             |
-| CLEVRER       | VideoSAUR   | 4/7 (*)     | [checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/cjepa-ckpts/clevrer_videosaur_4_epoch_30_object.ckpt)                             |
-| CLEVRER       | SAVi        | 0/7      | [checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/cjepa-ckpts/clevrer_savi_0_epoch_30_object.ckpt)                             |
-| CLEVRER       | SAVi        | 1/7      | [checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/cjepa-ckpts/clevrer_savi_1_epoch_30_object.ckpt)                             |
-| CLEVRER       | SAVi        | 2/7 (*)     | [checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/cjepa-ckpts/clevrer_savi_2_epoch_30_object.ckpt)                             |
-| CLEVRER       | SAVi        | 3/7      | [checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/cjepa-ckpts/clevrer_savi_3_epoch_30_object.ckpt)                             |
-| CLEVRER       | SAVi        | 4/7      | [checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/cjepa-ckpts/clevrer_savi_4_epoch_30_object.ckpt)                             |
-| PUSHT       | VideoSAUR   | 0/4      | [checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/cjepa-ckpts/pusht_videosaur_0_epoch_30_object.ckpt)                             |
-| PUSHT       | VideoSAUR   | 1/4  (*)    | [checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/cjepa-ckpts/pusht_videosaur_1_epoch_30_object.ckpt)                             |
-| PUSHT       | VideoSAUR   | 2/4      | [checkpoint](https://huggingface.co/HazelNam/CJEPA/blob/main/cjepa-ckpts/pusht_videosaur_2_epoch_30_object.ckpt)                             |   
+### `src/ctt_losses.py`
+- `ctt_invariance_loss()` — Runs a second forward pass with an additional slot masked. Penalizes prediction degradation for non-neighbor slots.
+- `ctt_sufficiency_loss()` — Masks non-neighbors of a target slot. Penalizes poor prediction from the neighborhood alone.
+- `_get_slot_attention()` — Extracts slot-to-slot attention with gradients (unlike the original `@torch.no_grad` `attention_probing()`).
 
-## Evaluation
-### Evaluate Control on Push-T
-  ```
-  sh scripts/pusht/test_planning.sh
-  ```
+### `compute_loss()` modifications
+```python
+# Original C-JEPA
+total_loss = loss_masked_history + loss_future
 
-### Evaluate Visual Reasoning on CLEVRER
+# CTT-JEPA (our contribution)
+total_loss = loss_masked_history + loss_future
+           + ctt_inv_weight * invariance_loss    # 0.0 = disabled
+           + ctt_suf_weight * sufficiency_loss   # 0.0 = disabled
+```
 
-  * We will first rollout slots (from 128 frame to 160 frame) with C-JEPA checkpoint and pre-extracted slots.
+### Config flags
+```yaml
+ctt_inv_weight: 0.0        # invariance loss weight (0 = C-JEPA baseline)
+ctt_suf_weight: 0.0        # sufficiency loss weight (0 = C-JEPA baseline)
+ctt_adj_threshold: 0.15    # attention threshold for neighbor detection
+ctt_start_epoch: 10        # phased: CTT losses activate after this epoch
+```
+</details>
 
-  ```
-  # change CKPTPATH and SLOTPATH, `predictor_lr`, `num_masked_slots` before. SLOTPATH should be matched with the checkpoint that you are using (dataset, oc-encoder) and it should point to the pre-extracted slot representations. For example, if you are using `clevrer_savi_2.ckpt`, you should use `clevrer_savi_slots.pkl` and set `num_masked_slots` to 2.
-  # `predictor_lr` (default=5e-4), `num_masked_slots` should be matched with config is CKPT that you are using (they go to the output name)
-  # output name will be like : rollout_{SLOTPATH name}_{CKPT lr, CKPT masked slot}
-  sh scripts/clevrer/rollout_from_slot.sh
-  ```
-  * This will save output file under the same directory as the pre-extracted slot representations.
-  ```
-  # rollout_clevrer_slots_{configuration}.pkl :
-  {
-      'train': {'0_pixels.mp4': slots, '1_pixels.mp4': slots, ...},  # slots: [160, N, 128] each
-      'val': {...},
-      'test': {...}
-  }
-  ```
-  * Then you can run the code below to evaluate C-JEPA on CLEVRER visual question answering.
-  * Again, before running the code, replace whole `src/third_party/nerv/nerv/utils/misc.py` with `src/custom_codes/misc.py`. This is because the thrid-party code is based on `pytorch-lightning==0.8.*` while we are using `pytorch-lightning==2.6.*`.
-  * You should change params manually in `src/third_party/slotformer/clevrer_vqa/configs/aloe_clevrer_params-rollout.py`. For example, 
-    * `gpu` (it should exactly match the number of the visible devices)
-    * `lr`
-  * Then run script below to train and test aloe.
+## Quick Start (RunPod / GPU Server)
 
-  ```
-  sh scripts/clevrer/train_aloe.sh
-  sh scripts/clevrer/test_aloe.sh
-  ```
+### Setup
+
+```bash
+git clone -b ctt-jepa https://github.com/GerardCB/cjepa.git
+cd cjepa
+bash scripts/ctt/setup_runpod.sh
+```
+
+> Tested on `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`
+
+### Train world models
+
+```bash
+bash scripts/ctt/train_worldmodels.sh
+```
+
+Trains baseline C-JEPA (30 epochs) + CTT-JEPA (30 epochs, CTT from epoch 10), with slot rollouts.
+
+### Evaluate with ALOE VQA
+
+```bash
+bash scripts/ctt/train_aloe.sh
+```
+
+Trains ALOE VQA on both rollouts. Check results:
+```bash
+grep 'Eval epoch' logs/aloe_baseline.log
+grep 'Eval epoch' logs/aloe_ctt.log
+```
+
+**Total time: ~7.5 hours on 1× H100.**
+
+### Manual run
+
+```bash
+export PYTHONPATH=$(pwd)
+
+# Train CTT-JEPA
+python src/train/train_causalwm_from_clevrer_slot.py \
+    embedding_dir=./data/clevrer_videosaur_slots.pkl \
+    batch_size=2048 trainer.max_epochs=30 \
+    ctt_inv_weight=0.2 ctt_suf_weight=0.1 ctt_start_epoch=10 \
+    rollout.save_rollout=true output_model_name=ctt_full
+```
+
+## Repository Structure
+
+```
+cjepa/
+├── src/
+│   ├── ctt_losses.py                    ← Our CTT loss functions
+│   ├── aloe_train.py                    ← ALOE VQA training (patched)
+│   ├── cjepa_predictor.py               ← MaskedSlotPredictor (unmodified)
+│   ├── train/
+│   │   └── train_causalwm_from_clevrer_slot.py  ← Modified training loop
+│   └── third_party/                     ← Dependencies
+├── configs/
+│   └── config_train_causal_clevrer_slot.yaml    ← Modified config
+├── scripts/ctt/
+│   ├── setup_runpod.sh                  ← One-command environment setup
+│   ├── train_worldmodels.sh             ← Train baseline + CTT world models
+│   ├── train_aloe.sh                    ← Train ALOE VQA on both rollouts
+│   └── fix_torchcodec.py               ← Patch torchcodec for CUDA compat
+├── results/
+│   └── logs/                            ← Training logs with eval metrics
+├── RESULTS.md                           ← Full experiment analysis
+└── data/                                ← Slot embeddings (downloaded)
+```
+
+## Citation
+
+```bibtex
+@article{ctt-jepa2026,
+    title={CTT-JEPA: Enforcing Causal Axioms in Joint Embedding Predictive Architectures},
+    author={Gerard Calvo Bartra},
+    year={2026}
+}
+```
+
+## Acknowledgments
+
+Built on top of [C-JEPA](https://github.com/galilai-group/cjepa) by the Galilai Group. CTT axioms adapted from Causal Transformation Theory.
