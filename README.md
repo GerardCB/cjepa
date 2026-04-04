@@ -4,18 +4,18 @@
 
 ## Key Idea
 
-C-JEPA learns a causal world model through **masked slot prediction** — masking object slots and predicting them from context. We add two loss terms derived from [Causal Transformation Theory](ctt-builders-guide.md) that enforce the attention-based causal graph to satisfy fundamental causal axioms:
+C-JEPA learns a causal world model through **masked slot prediction** — masking object slots and predicting them from context. We add two loss terms derived from our [Causal Transformation Theory](ctt-builders-guide.md) that enforce the attention-based causal graph to satisfy fundamental causal axioms:
 
 | Loss | CTT Axiom | What it enforces |
 |---|---|---|
-| **Invariance** | Axiom 6 | Masking a non-interacting slot should *not* degrade predictions for unrelated slots |
 | **Sufficiency** | Axiom 4 | A slot's causal neighborhood alone should *suffice* to predict it |
+| **Invariance** | Axiom 6 | Masking a non-interacting slot should *not* degrade predictions for unrelated slots |
 
 These losses use the transformer's own attention weights as the causal adjacency graph — **no architecture changes** are required. The only modification is two additive loss terms controlled via config flags.
 
 ## Results
 
-Evaluated on **CLEVRER VQA** using the ALOE framework. Both models trained for 30 epochs (world model) + 100 epochs (ALOE VQA) on 1× H100 with `|M|=2` masked slots and `batch_size=2048`.
+Evaluated on **CLEVRER VQA** using the ALOE framework. Both _Baseline_ and _CTT-JEPA_ models were trained for 30 epochs (world model) + 100 epochs (ALOE VQA) on 1× H100 with `|M|=2` masked slots and `batch_size=2048`.
 
 ### ALOE VQA Accuracy (Epoch 79)
 
@@ -27,13 +27,13 @@ Evaluated on **CLEVRER VQA** using the ALOE framework. Both models trained for 3
 | **Predictive** | **80.1%** | 77.9% | −2.2% | 79.6% |
 | **Multiple-choice** | **72.1%** | 66.7% | −5.4% | — |
 
-> ✅ Our baseline matches or exceeds the paper's C-JEPA (V) results at |M|=2, validating the pipeline.
+> Our baseline matches or exceeds the paper's C-JEPA (V) results at |M|=2, validating the pipeline.
 >
-> ❌ CTT losses (invariance + sufficiency) via attention-based causal graphs **degrade** VQA by 2–8%.
+> CTT losses (invariance + sufficiency) via attention-based causal graphs degrade VQA by 2–8%.
 
 ### Analysis
 
-The attention weights used as the causal adjacency matrix capture **statistical correlations, not causal structure**. This causes the invariance and sufficiency losses to enforce the wrong constraints — particularly harming counterfactual reasoning (−8.1%). Key takeaways:
+The attention weights used as the causal adjacency matrix capture statistical correlations, not causal structure. This causes the invariance and sufficiency losses to enforce the wrong constraints — particularly harming counterfactual reasoning (−8.1%). Key takeaways:
 
 - **Naive CTT integration is insufficient** — a proper causal discovery mechanism is needed
 - **A learned causal graph** (e.g., DAG-GNN, NOTEARS) would likely improve results
@@ -43,12 +43,12 @@ For full analysis, see [RESULTS.md](RESULTS.md).
 
 ## What Changed from C-JEPA
 
-Only **3 files** were modified/added:
+Only 3 files were modified/added:
 
 ```
 src/ctt_losses.py                              [NEW]  — CTT loss functions
 src/train/train_causalwm_from_clevrer_slot.py  [MOD]  — Integrated CTT into compute_loss()
-configs/config_train_causal_clevrer_slot.yaml   [MOD]  — Added CTT config flags
+configs/config_train_causal_clevrer_slot.yaml  [MOD]  — Added CTT config flags
 ```
 
 <details>
